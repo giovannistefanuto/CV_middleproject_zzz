@@ -1,1 +1,13 @@
+# Escludi la cartella dei dataset
 dataset/
+
+# Escludi la cartella di build di CMake
+build/
+bin/
+obj/
+
+# Escludi file temporanei di sistema o editor
+.vscode/
+*.swp
+*.o
+.DS_Store
