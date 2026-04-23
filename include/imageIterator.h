@@ -1,6 +1,7 @@
 #ifndef IMAGE_ITERATOR_CV_ZZZ_H
 #define IMAGE_ITERATOR_CV_ZZZ_H
 #include <opencv2/opencv.hpp>
+#include <vector>
 
 class ImageIterator
 {
@@ -15,9 +16,8 @@ public:
 
 private:
     std::string path;
-    std::string ext;
+    std::vector<std::string> imagePaths;
     int currentIndex;
-    cv::Mat image;
 };
 
 #endif

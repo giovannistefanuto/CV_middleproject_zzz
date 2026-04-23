@@ -1,27 +1,35 @@
 #include <imageIterator.h>
+#include <algorithm>
 
 ImageIterator::ImageIterator(const std::string& path){
-    if(!path.empty())
-        this->path="../dataset/data/"+path;
-    currentIndex=0;
-    if (cv::imread(path+"0000.png").empty())
-        ext=".jpg";
-    else
-        ext=".png";
+    this->path = path;
+    currentIndex = 0;
+
+    std::vector<std::string> pngFiles;
+    std::vector<std::string> jpgFiles;
+    std::vector<std::string> jpegFiles;
+
+    cv::glob(this->path + "/*.png", pngFiles, false);
+    cv::glob(this->path + "/*.jpg", jpgFiles, false);
+    cv::glob(this->path + "/*.jpeg", jpegFiles, false);
+
+    imagePaths.reserve(pngFiles.size() + jpgFiles.size() + jpegFiles.size());
+    imagePaths.insert(imagePaths.end(), pngFiles.begin(), pngFiles.end());
+    imagePaths.insert(imagePaths.end(), jpgFiles.begin(), jpgFiles.end());
+    imagePaths.insert(imagePaths.end(), jpegFiles.begin(), jpegFiles.end());
+
+    std::sort(imagePaths.begin(), imagePaths.end());
 }
 
 void ImageIterator::next(cv::Mat& image){
-    std::string completePath = path+"/"+std::to_string(currentIndex)+ext;
     if(hasNext()){
-        image=cv::imread(completePath);
+        image = cv::imread(imagePaths[currentIndex], cv::IMREAD_COLOR);
         ++currentIndex;
     }
 }
 
 bool ImageIterator::hasNext(){
-    if (cv::imread(path+std::to_string(currentIndex)+ext).empty())
-        return false;
-    return true;
+    return currentIndex < static_cast<int>(imagePaths.size());
 }
 
 std::string ImageIterator::getPath() const{

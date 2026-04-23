@@ -2,6 +2,7 @@
 #define FEATURELIST_CV_ZZZ_H
 #include <opencv2/highgui.hpp>
 #include "feature.h"
+#include <vector>
 
 class featureList
 {
