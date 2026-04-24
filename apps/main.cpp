@@ -101,6 +101,14 @@ static bool processCategory(const std::string& inputFolder)
         hasLastBox = true;
     }
 
+    cv::Point box_point_1(lastBox.x,lastBox.y);
+    cv::Point box_point_2(lastBox.x+lastBox.width,lastBox.y+lastBox.height);
+
+    std::vector<cv::Point> boxPoints{box_point_1,box_point_2}; 
+
+    std::string category= getLastPart(inputFolder);
+    std::vector<cv::Point> realPoints = extract_ground_truth(category);
+    float score=evaluate_mIoU(boxPoints,realPoints);
     // Salvataggio del primo frame annotato.
     if(!saveFrame(inputFolder,firstFrame,lastBox,firstSavedPoints,0,showSavedFeatures))
     {
@@ -186,6 +194,7 @@ static bool processCategory(const std::string& inputFolder)
     }
 
     std::cout << "Elaborazione completata. Immagini annotate salvate in: " << inputFolder << " followed by the desired words" << std::endl;
+    std::cout << "ACTUAL SCORE: "<<score<<std::endl;
     return true;
 }
 

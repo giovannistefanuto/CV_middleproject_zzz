@@ -1,10 +1,71 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/utils/filesystem.hpp>
 #include <utils.h>
+#include <fstream>
+#include <algorithm>
 
 
-float evaluate_mIoU(std::vector<cv::Point>& predicted_points, std::vector<cv::Point>& ground_truth_points, cv::InputOutputArray& output_image=cv::noArray()){
-    return 0.0f;
+std::vector<cv::Point> extract_ground_truth(const std::string& path){
+    std::ifstream file("dataset/labels/"+path+"/0000.txt");
+    int temp;
+    cv::Point p1,p2;
+
+    // Read up to 4 integers as long as the file stream is healthy
+    file >> temp;
+    p1.x=temp;
+    file >> temp;
+    p1.y=temp;
+    file >> temp;
+    p2.x=temp;
+    file >> temp;
+    p2.y=temp;
+
+    std::vector<cv::Point> ground_truth{p1,p2};
+    return ground_truth;
+}
+
+std::string getLastPart(const std::string& path){
+    size_t pos=path.find_last_of("/\\");
+    if(pos==std::string::npos)
+        return path;
+    return path.substr(pos+1);
+}
+
+float evaluate_mIoU(std::vector<cv::Point>& predicted_points, std::vector<cv::Point>& ground_truth_points){
+    std::vector<int> x_s;
+    std::vector<int> y_s;
+
+    for(int i=0;i<2;i++){
+        x_s.push_back(predicted_points[i].x);
+        x_s.push_back(ground_truth_points[i].x);
+
+        y_s.push_back(predicted_points[i].y);
+        y_s.push_back(ground_truth_points[i].y);
+    }
+
+    std::sort(x_s.begin(),x_s.end());
+    std::sort(y_s.begin(),y_s.end());
+
+    float inter_w = std::max(0, x_s[2] - y_s[1]);
+    float inter_h = std::max(0, y_s[2] - y_s[1]);
+    float inter_area = inter_w * inter_h;
+
+    int min_pred_x=std::min(predicted_points[0].x,predicted_points[1].x);
+    int min_pred_y=std::min(predicted_points[0].y,predicted_points[1].y);
+    int min_ground_x=std::min(ground_truth_points[0].x,ground_truth_points[1].x);
+    int min_ground_y=std::min(ground_truth_points[0].y,ground_truth_points[1].y);
+
+    int max_pred_x=std::max(predicted_points[0].x,predicted_points[1].x);
+    int max_pred_y=std::max(predicted_points[0].y,predicted_points[1].y);
+    int max_ground_x=std::max(ground_truth_points[0].x,ground_truth_points[1].x);
+    int max_ground_y=std::max(ground_truth_points[0].y,ground_truth_points[1].y);
+
+    int union_area=(max_pred_x-min_pred_x)*(max_pred_y-min_pred_y)+(max_ground_x-min_ground_x)*(max_ground_y-min_ground_y);
+    float tot_area=union_area-inter_area;
+
+    std::cout<<inter_area<<" "<<union_area<<" "<<tot_area<<std::endl;
+
+    return inter_area/tot_area;
 }
 
 void detectSIFTPoints(const cv::Mat& gray, cv::Ptr<cv::SIFT>& sift, std::vector<cv::Point2f>& points)
@@ -56,10 +117,12 @@ bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>& points, const 
 }
 
 int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<cv::Point2f>& savedPoints, bool verbose=false){
-    const float minMovement = 0.20f;
+    //float minMovement = 0.70f;
     const float maxMovement = 100.0f;
     int survived=0;
-    
+    std::vector<float> allMotions;
+    float motion, max=0;
+
     for (size_t i = 0; i < newPoints.size(); ++i)
     {
         if (!active[i])
@@ -69,9 +132,18 @@ int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>&
 
         float dx = newPoints[i].x - activePoints[i].x;
         float dy = newPoints[i].y - activePoints[i].y;
-        float motion = std::sqrt(dx * dx + dy * dy);
+        motion = std::sqrt(dx * dx + dy * dy);
+        allMotions.push_back(motion);
 
-        if (motion > minMovement && motion < maxMovement)
+        if(motion>max && motion<maxMovement){
+            max=motion;
+        }
+    }
+
+    float minMovement=2*max/5;
+
+    for (size_t i = 0; i < newPoints.size(); ++i){
+        if (allMotions[i] > minMovement && allMotions[i] < maxMovement)
         {
             // La box del frame 0 deve usare punti del frame 0, non del frame 1.
             savedPoints.push_back(activePoints[i]);
@@ -120,7 +192,7 @@ bool keepDebugOutput(const std::string& path){
     // Flag debug per categoria: abilita/disabilita i log dettagliati del movimento feature.
     const bool logBird = false;
     const bool logCar = false;
-    const bool logFrog = true;
+    const bool logFrog = false;
     const bool logSheep = false;
     const bool logSquirrel = false;
 
