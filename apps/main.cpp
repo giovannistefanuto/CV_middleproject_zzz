@@ -40,6 +40,8 @@ static bool processCategory(const std::string& inputFolder)
 
     cv::Mat prevGray;
     cv::cvtColor(firstFrame, prevGray, cv::COLOR_BGR2GRAY);
+    //HISTOGRAM EQUALIZATION
+    //cv::equalizeHist(prevGray, prevGray);
 
     // Feature iniziali rilevate con SIFT sul frame 0.
     cv::Ptr<cv::SIFT> sift = cv::SIFT::create(60000);

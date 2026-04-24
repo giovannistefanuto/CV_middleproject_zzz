@@ -3,6 +3,7 @@
 #include <utils.h>
 #include <fstream>
 #include <algorithm>
+#include <vector>
 
 
 std::vector<cv::Point> extract_ground_truth(const std::string& path){
@@ -31,41 +32,47 @@ std::string getLastPart(const std::string& path){
     return path.substr(pos+1);
 }
 
-float evaluate_mIoU(std::vector<cv::Point>& predicted_points, std::vector<cv::Point>& ground_truth_points){
-    std::vector<int> x_s;
-    std::vector<int> y_s;
-
-    for(int i=0;i<2;i++){
-        x_s.push_back(predicted_points[i].x);
-        x_s.push_back(ground_truth_points[i].x);
-
-        y_s.push_back(predicted_points[i].y);
-        y_s.push_back(ground_truth_points[i].y);
+float evaluate_mIoU(std::vector<cv::Point>& predicted_points, std::vector<cv::Point>& ground_truth_points) {
+    // Controllo di sicurezza base
+    if (predicted_points.size() < 2 || ground_truth_points.size() < 2) {
+        return 0.0f;
     }
 
-    std::sort(x_s.begin(),x_s.end());
-    std::sort(y_s.begin(),y_s.end());
+    // Trova i minimi e massimi per entrambi i box
+    int min_pred_x = std::min(predicted_points[0].x, predicted_points[1].x);
+    int max_pred_x = std::max(predicted_points[0].x, predicted_points[1].x);
+    int min_pred_y = std::min(predicted_points[0].y, predicted_points[1].y);
+    int max_pred_y = std::max(predicted_points[0].y, predicted_points[1].y);
 
-    float inter_w = std::max(0, x_s[2] - y_s[1]);
-    float inter_h = std::max(0, y_s[2] - y_s[1]);
+    int min_ground_x = std::min(ground_truth_points[0].x, ground_truth_points[1].x);
+    int max_ground_x = std::max(ground_truth_points[0].x, ground_truth_points[1].x);
+    int min_ground_y = std::min(ground_truth_points[0].y, ground_truth_points[1].y);
+    int max_ground_y = std::max(ground_truth_points[0].y, ground_truth_points[1].y);
+
+    // Calcola le coordinate del rettangolo di intersezione
+    int inter_min_x = std::max(min_pred_x, min_ground_x);
+    int inter_min_y = std::max(min_pred_y, min_ground_y);
+    int inter_max_x = std::min(max_pred_x, max_ground_x);
+    int inter_max_y = std::min(max_pred_y, max_ground_y);
+
+    // Calcola l'area di intersezione (se non si sovrappongono, w o h saranno 0)
+    float inter_w = std::max(0, inter_max_x - inter_min_x);
+    float inter_h = std::max(0, inter_max_y - inter_min_y);
     float inter_area = inter_w * inter_h;
 
-    int min_pred_x=std::min(predicted_points[0].x,predicted_points[1].x);
-    int min_pred_y=std::min(predicted_points[0].y,predicted_points[1].y);
-    int min_ground_x=std::min(ground_truth_points[0].x,ground_truth_points[1].x);
-    int min_ground_y=std::min(ground_truth_points[0].y,ground_truth_points[1].y);
+    // Calcola le aree dei singoli box
+    float pred_area = (max_pred_x - min_pred_x) * (max_pred_y - min_pred_y);
+    float ground_area = (max_ground_x - min_ground_x) * (max_ground_y - min_ground_y);
 
-    int max_pred_x=std::max(predicted_points[0].x,predicted_points[1].x);
-    int max_pred_y=std::max(predicted_points[0].y,predicted_points[1].y);
-    int max_ground_x=std::max(ground_truth_points[0].x,ground_truth_points[1].x);
-    int max_ground_y=std::max(ground_truth_points[0].y,ground_truth_points[1].y);
+    // Calcola la vera area di unione
+    float union_area = pred_area + ground_area - inter_area;
 
-    int union_area=(max_pred_x-min_pred_x)*(max_pred_y-min_pred_y)+(max_ground_x-min_ground_x)*(max_ground_y-min_ground_y);
-    float tot_area=union_area-inter_area;
+    // Previene la divisione per zero
+    if (union_area <= 0.0f) {
+        return 0.0f;
+    }
 
-    std::cout<<inter_area<<" "<<union_area<<" "<<tot_area<<std::endl;
-
-    return inter_area/tot_area;
+    return inter_area / union_area;
 }
 
 void detectSIFTPoints(const cv::Mat& gray, cv::Ptr<cv::SIFT>& sift, std::vector<cv::Point2f>& points)
@@ -118,7 +125,7 @@ bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>& points, const 
 
 int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<cv::Point2f>& savedPoints, bool verbose=false){
     //float minMovement = 0.70f;
-    const float maxMovement = 100.0f;
+    const float maxMovement = 50.0f;
     int survived=0;
     std::vector<float> allMotions;
     float motion, max=0;
@@ -127,6 +134,7 @@ int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>&
     {
         if (!active[i])
         {
+            allMotions.push_back(0.0f);
             continue;
         }
 
@@ -139,8 +147,10 @@ int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>&
             max=motion;
         }
     }
+    //std::cout << "Max motion: " << max << std::endl;
+    float minMovement=6*max/10;
+    //std::cout << "Min motion: " << minMovement << std::endl;
 
-    float minMovement=2*max/5;
 
     for (size_t i = 0; i < newPoints.size(); ++i){
         if (allMotions[i] > minMovement && allMotions[i] < maxMovement)
@@ -196,7 +206,7 @@ bool keepDebugOutput(const std::string& path){
     const bool logSheep = false;
     const bool logSquirrel = false;
 
-    bool logFeatureMotion = false;
+    bool logFeatureMotion = true;
     if (path.find("bird") != std::string::npos)
     {
         logFeatureMotion = logBird;
