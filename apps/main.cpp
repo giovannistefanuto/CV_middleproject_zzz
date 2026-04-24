@@ -30,6 +30,66 @@ static bool processCategory(const std::string& inputFolder)
         return false;
     }
 
+    int aliveFeatures, numFrames=15;
+    std::string category= getLastPart(inputFolder);
+    std::vector<cv::Mat> frames(numFrames);
+    std::vector<float> motions, err;
+    std::vector<uchar> status;
+    std::vector<cv::Point2f> referencePoints, movedPoints, printablePoints;
+    std::vector<cv::Point> realPoints = extract_ground_truth(category);
+
+    cv::Rect box;
+    cv::Mat referenceGray, actualGray;
+    cv::Point box_point_1,box_point_2;
+    cv::Ptr<cv::SIFT> sift = cv::SIFT::create(60000);
+
+    for(int i=0;iterator.hasNext();i++)
+    {
+        iterator.next(frames[i%numFrames]);
+        if(i%numFrames==0)
+        {
+            cv::cvtColor(frames[0], referenceGray, cv::COLOR_BGR2GRAY);
+            referencePoints.clear();
+            detectSIFTPoints(referenceGray, sift, referencePoints);
+            motions = std::vector<float>(referencePoints.size());
+            continue;
+        }
+        cv::cvtColor(frames[i%numFrames], actualGray, cv::COLOR_BGR2GRAY);
+        cv::calcOpticalFlowPyrLK(referenceGray, actualGray, referencePoints, movedPoints, status, err);
+        accumulateMotion(movedPoints,referencePoints,status,motions);
+        if((i+1)%numFrames==0 || !iterator.hasNext())
+        {
+            aliveFeatures = featureFilter(referencePoints,printablePoints,motions);
+            computeBoundingBoxFromPoints(printablePoints, frames[0].size(), box);
+            box_point_1= cv::Point(box.x,box.y);
+            box_point_2= cv::Point(box.x+box.width,box.y+box.height);
+            std::vector<cv::Point> boxPoints{box_point_1,box_point_2};
+
+            if(i==numFrames-1)
+            {
+                float score=evaluate_mIoU(boxPoints,realPoints);
+                std::cout<<score<<std::endl;
+            }
+            bool result=true;
+            for(int j=0;j<numFrames;j++)
+            {   
+                result &= saveFrame(inputFolder,frames[j],box,printablePoints,i-(numFrames-j)+1,showSavedFeatures);
+            }
+            if(!result)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+    
+    // Salvataggio del primo frame annotato.
+    
+    
+
+    /*
     // Inizializzazione pipeline dal primo frame.
     cv::Mat firstFrame;
     iterator.next(firstFrame);
@@ -49,6 +109,7 @@ static bool processCategory(const std::string& inputFolder)
     cv::Rect lastBox;
     bool hasLastBox = false;
     std::vector<cv::Point2f> firstSavedPoints;
+    std::vector<float> motions;
 
     cv::Mat pendingFrame;
     bool hasPendingFrame = false;
@@ -70,16 +131,22 @@ static bool processCategory(const std::string& inputFolder)
 
             // Stima del moto delle feature dal primo al secondo frame.
             cv::calcOpticalFlowPyrLK(prevGray, pendingGray, activePoints, firstToSecondPoints, firstStatus, firstErr);
+            motions=std::vector<float>(activePoints.size());
 
-            //int survivedInFirstFlow = 0;
-            int survivedInFirstFlow = featureFilter(firstToSecondPoints,activePoints,firstStatus,firstSavedPoints,logFeatureMotion);
+            accumulateMotion(firstToSecondPoints,activePoints,firstStatus,motions);
+            
+            cv::Mat relevantFrame=pendingFrame.clone();
+            iterator.next(pendingFrame);//TODO
 
+            int survivedInFirstFlow = featureFilter(activePoints,firstSavedPoints,motions);
+
+            
             if (logFrameSummary)
             {
                 std::cout << "[DEBUG][Frame 0->1] sopravvissute " << survivedInFirstFlow
                           << " su " << firstToSecondPoints.size() << std::endl;
             }
-
+            
             if (computeBoundingBoxFromPoints(firstSavedPoints, firstFrame.size(), lastBox))
             {
                 hasLastBox = true;
@@ -114,7 +181,9 @@ static bool processCategory(const std::string& inputFolder)
     {
         return false;
     }
-
+    return true;
+*/
+/*
     // Loop principale: tracking frame-to-frame fino all'ultima immagine.
     int frameCounter = 1;
     while (hasPendingFrame || iterator.hasNext())
@@ -152,9 +221,13 @@ static bool processCategory(const std::string& inputFolder)
 
         // Filtro del moto: elimina sfondo quasi fermo e outlier troppo veloci.
         std::vector<cv::Point2f> movingPoints;
-        int survivedFeatures = featureFilter(nextPoints,activePoints,status,movingPoints,logFeatureMotion);
+        if(frameCounter%5==0){
+            motions=std::vector<float>(activePoints.size());
+        }
 
-        if (logFrameSummary)
+        int survivedFeatures = featureFilter(nextPoints,activePoints,status,movingPoints,motions,logFeatureMotion);
+
+        /*if (logFrameSummary)
         {
             std::cout << "[DEBUG][Frame " << (frameCounter - 1) << "->" << frameCounter << "] sopravvissute "
                       << survivedFeatures << " su " << nextPoints.size() << std::endl;
@@ -196,7 +269,8 @@ static bool processCategory(const std::string& inputFolder)
     std::cout << "Elaborazione completata. Immagini annotate salvate in: " << inputFolder << " followed by the desired words" << std::endl;
     std::cout << "ACTUAL SCORE: "<<score<<std::endl;
     return true;
-}
+    */
+//}
 
 int main(int argc, char** argv){
     // Modalita' 1: una singola cartella passata da riga di comando.
@@ -213,11 +287,11 @@ int main(int argc, char** argv){
     }
 
     std::vector<std::string> categories;
-    categories.push_back("dataset/data/bird");
-    categories.push_back("dataset/data/car");
-    categories.push_back("dataset/data/frog");
-    categories.push_back("dataset/data/sheep");
-    categories.push_back("dataset/data/squirrel");
+    categories.push_back("../dataset/data/bird");
+    categories.push_back("../dataset/data/car");
+    categories.push_back("../dataset/data/frog");
+    categories.push_back("../dataset/data/sheep");
+    categories.push_back("../dataset/data/squirrel");
 
     // Log esplicito di avanzamento tra categorie per tracciare l'esecuzione batch.
     for (size_t i = 0; i < categories.size(); ++i)

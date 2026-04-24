@@ -12,7 +12,8 @@ float evaluate_mIoU(std::vector<cv::Point>&, std::vector<cv::Point>&);
 void detectSIFTPoints(const cv::Mat&, cv::Ptr<cv::SIFT>&, std::vector<cv::Point2f>&);
 bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>&, const cv::Size&, cv::Rect&);
 
-int featureFilter(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<cv::Point2f>& savedPoints, bool verbose);
+void accumulateMotion(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<float>& allMotions);
+int featureFilter(std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2f>& savedPoints, std::vector<float>& allMotions);
 bool saveFrame(const std::string& folder, const cv::Mat& frame, const cv::Rect& box, const std::vector<cv::Point2f>& savedPoints, int frameCounter, bool showFeatures);
 bool keepDebugOutput(const std::string& path);
 
