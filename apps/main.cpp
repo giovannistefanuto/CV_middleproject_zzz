@@ -9,133 +9,16 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
-
-static void detectSIFTPoints(
-    const cv::Mat& gray,
-    cv::Ptr<cv::SIFT>& sift,
-    std::vector<cv::Point2f>& points)
-{
-    // Estrae keypoint SIFT e li converte in punti 2D tracciabili con Optical Flow.
-    std::vector<cv::KeyPoint> keypoints;
-    cv::Mat descriptors;
-    sift->detectAndCompute(gray, cv::noArray(), keypoints, descriptors);
-
-    for (size_t i = 0; i < keypoints.size(); ++i)
-    {
-        points.push_back(keypoints[i].pt);
-    }
-}
-
-static void drawBoundingBoxFromPoints(cv::Mat& image, const std::vector<cv::Point2f>& points)
-{
-    if (points.empty())
-    {
-        return;
-    }
-
-    float minX = points[0].x;
-    float maxX = points[0].x;
-    float minY = points[0].y;
-    float maxY = points[0].y;
-
-    for (size_t i = 1; i < points.size(); ++i)
-    {
-        minX = std::min(minX, points[i].x);
-        maxX = std::max(maxX, points[i].x);
-        minY = std::min(minY, points[i].y);
-        maxY = std::max(maxY, points[i].y);
-    }
-
-    cv::Rect box(
-        cv::Point(static_cast<int>(minX), static_cast<int>(minY)),
-        cv::Point(static_cast<int>(maxX), static_cast<int>(maxY))
-    );
-
-    cv::rectangle(image, box, cv::Scalar(0, 255, 0), 2);
-}
-
-static bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>& points, const cv::Size& imageSize, cv::Rect& box)
-{
-    // Calcola bbox axis-aligned e la limita ai bordi immagine.
-    if (points.empty())
-    {
-        return false;
-    }
-
-    float minX = points[0].x;
-    float maxX = points[0].x;
-    float minY = points[0].y;
-    float maxY = points[0].y;
-
-    for (size_t i = 1; i < points.size(); ++i)
-    {
-        minX = std::min(minX, points[i].x);
-        maxX = std::max(maxX, points[i].x);
-        minY = std::min(minY, points[i].y);
-        maxY = std::max(maxY, points[i].y);
-    }
-
-    int x1 = std::max(0, static_cast<int>(minX));
-    int y1 = std::max(0, static_cast<int>(minY));
-    int x2 = std::min(imageSize.width - 1, static_cast<int>(maxX));
-    int y2 = std::min(imageSize.height - 1, static_cast<int>(maxY));
-
-    if (x2 <= x1 || y2 <= y1)
-    {
-        return false;
-    }
-
-    box = cv::Rect(cv::Point(x1, y1), cv::Point(x2, y2));
-    return true;
-}
+#include "utils.h"
 
 static bool processCategory(const std::string& inputFolder)
 {
     // Ogni categoria salva output in una cartella dedicata accanto all'input.
-    const std::string outputFolder = inputFolder + "_annotate";
 
-    if (!cv::utils::fs::exists(inputFolder)) {
-        std::cerr << "Errore: cartella input non trovata: " << inputFolder << std::endl;
-        return false;
-    }
-
-    if (!cv::utils::fs::exists(outputFolder)) {
-        cv::utils::fs::createDirectories(outputFolder);
-    }
-
-    const float minMovement = 0.20f;
-    const float maxMovement = 100.0f;
     const int refreshEveryNFrames = 2;
     const bool showSavedFeatures = true;
 
-    // Flag debug per categoria: abilita/disabilita i log dettagliati del movimento feature.
-    const bool logBird = false;
-    const bool logCar = false;
-    const bool logFrog = true;
-    const bool logSheep = false;
-    const bool logSquirrel = false;
-
-    bool logFeatureMotion = false;
-    if (inputFolder.find("bird") != std::string::npos)
-    {
-        logFeatureMotion = logBird;
-    }
-    else if (inputFolder.find("car") != std::string::npos)
-    {
-        logFeatureMotion = logCar;
-    }
-    else if (inputFolder.find("frog") != std::string::npos)
-    {
-        logFeatureMotion = logFrog;
-    }
-    else if (inputFolder.find("sheep") != std::string::npos)
-    {
-        logFeatureMotion = logSheep;
-    }
-    else if (inputFolder.find("squirrel") != std::string::npos)
-    {
-        logFeatureMotion = logSquirrel;
-    }
+    bool logFeatureMotion=keepDebugOutput(inputFolder);
 
     const bool logFrameSummary = logFeatureMotion;
     const bool logCategorySummary = logFeatureMotion;
@@ -171,7 +54,7 @@ static bool processCategory(const std::string& inputFolder)
     bool hasPendingFrame = false;
 
     // Prima box: uso Optical Flow tra frame 0 e frame 1 per massima precisione sul frame iniziale.
-    if (iterator.hasNext())
+    if (iterator.hasNext() && !activePoints.empty())
     {
         iterator.next(pendingFrame);
         if (!pendingFrame.empty())
@@ -185,40 +68,11 @@ static bool processCategory(const std::string& inputFolder)
             std::vector<uchar> firstStatus;
             std::vector<float> firstErr;
 
-            if (!activePoints.empty())
-            {
-                // Stima del moto delle feature dal primo al secondo frame.
-                cv::calcOpticalFlowPyrLK(prevGray, pendingGray, activePoints, firstToSecondPoints, firstStatus, firstErr);
-            }
+            // Stima del moto delle feature dal primo al secondo frame.
+            cv::calcOpticalFlowPyrLK(prevGray, pendingGray, activePoints, firstToSecondPoints, firstStatus, firstErr);
 
-            std::vector<cv::Point2f> movingPointsInFirstFrame;
-            int survivedInFirstFlow = 0;
-            for (size_t i = 0; i < firstToSecondPoints.size(); ++i)
-            {
-                if (!firstStatus[i])
-                {
-                    continue;
-                }
-
-                float dx = firstToSecondPoints[i].x - activePoints[i].x;
-                float dy = firstToSecondPoints[i].y - activePoints[i].y;
-                float motion = std::sqrt(dx * dx + dy * dy);
-
-                if (motion > minMovement && motion < maxMovement)
-                {
-                    // La box del frame 0 deve usare punti del frame 0, non del frame 1.
-                    movingPointsInFirstFrame.push_back(activePoints[i]);
-                    ++survivedInFirstFlow;
-
-                    if (logFeatureMotion)
-                    {
-                        std::cout << "[DEBUG][Frame 0->1] feature " << i
-                                  << " prev=(" << activePoints[i].x << "," << activePoints[i].y << ")"
-                                  << " next=(" << firstToSecondPoints[i].x << "," << firstToSecondPoints[i].y << ")"
-                                  << " motion=" << motion << std::endl;
-                    }
-                }
-            }
+            //int survivedInFirstFlow = 0;
+            int survivedInFirstFlow = featureFilter(firstToSecondPoints,activePoints,firstStatus,firstSavedPoints,logFeatureMotion);
 
             if (logFrameSummary)
             {
@@ -226,9 +80,7 @@ static bool processCategory(const std::string& inputFolder)
                           << " su " << firstToSecondPoints.size() << std::endl;
             }
 
-            firstSavedPoints = movingPointsInFirstFrame;
-
-            if (computeBoundingBoxFromPoints(movingPointsInFirstFrame, firstFrame.size(), lastBox))
+            if (computeBoundingBoxFromPoints(firstSavedPoints, firstFrame.size(), lastBox))
             {
                 hasLastBox = true;
             }
@@ -249,20 +101,17 @@ static bool processCategory(const std::string& inputFolder)
         hasLastBox = true;
     }
 
+    cv::Point box_point_1(lastBox.x,lastBox.y);
+    cv::Point box_point_2(lastBox.x+lastBox.width,lastBox.y+lastBox.height);
+
+    std::vector<cv::Point> boxPoints{box_point_1,box_point_2}; 
+
+    std::string category= getLastPart(inputFolder);
+    std::vector<cv::Point> realPoints = extract_ground_truth(category);
+    float score=evaluate_mIoU(boxPoints,realPoints);
     // Salvataggio del primo frame annotato.
-    cv::Mat firstOutput = firstFrame.clone();
-    cv::rectangle(firstOutput, lastBox, cv::Scalar(0, 255, 0), 2);
-    if (showSavedFeatures)
+    if(!saveFrame(inputFolder,firstFrame,lastBox,firstSavedPoints,0,showSavedFeatures))
     {
-        // Visualizza sul frame corrente le feature mantenute dopo i filtri.
-        for (size_t i = 0; i < firstSavedPoints.size(); ++i)
-        {
-            cv::circle(firstOutput, firstSavedPoints[i], 2, cv::Scalar(0, 0, 255), -1);
-        }
-    }
-    std::string firstOutputPath = outputFolder + "/frame_0000.png";
-    if (!cv::imwrite(firstOutputPath, firstOutput)) {
-        std::cerr << "Errore: impossibile salvare " << firstOutputPath << std::endl;
         return false;
     }
 
@@ -303,32 +152,7 @@ static bool processCategory(const std::string& inputFolder)
 
         // Filtro del moto: elimina sfondo quasi fermo e outlier troppo veloci.
         std::vector<cv::Point2f> movingPoints;
-        int survivedFeatures = 0;
-        for (size_t i = 0; i < nextPoints.size(); ++i)
-        {
-            if (!status[i])
-            {
-                continue;
-            }
-
-            float dx = nextPoints[i].x - activePoints[i].x;
-            float dy = nextPoints[i].y - activePoints[i].y;
-            float motion = std::sqrt(dx * dx + dy * dy);
-
-            if (motion > minMovement && motion < maxMovement)
-            {
-                movingPoints.push_back(nextPoints[i]);
-                ++survivedFeatures;
-
-                if (logFeatureMotion)
-                {
-                    std::cout << "[DEBUG][Frame " << (frameCounter - 1) << "->" << frameCounter << "] feature " << i
-                              << " prev=(" << activePoints[i].x << "," << activePoints[i].y << ")"
-                              << " next=(" << nextPoints[i].x << "," << nextPoints[i].y << ")"
-                              << " motion=" << motion << std::endl;
-                }
-            }
-        }
+        int survivedFeatures = featureFilter(nextPoints,activePoints,status,movingPoints,logFeatureMotion);
 
         if (logFrameSummary)
         {
@@ -354,35 +178,8 @@ static bool processCategory(const std::string& inputFolder)
             nextActivePoints.insert(nextActivePoints.end(), refreshedPoints.begin(), refreshedPoints.end());
         }
 
-        featureList trackedFeatures;
-        for (size_t i = 0; i < movingPoints.size(); ++i)
+        if(!saveFrame(inputFolder,currentFrame,lastBox,movingPoints,frameCounter,showSavedFeatures))
         {
-            trackedFeatures.addFeature(cv::Point(
-                static_cast<int>(movingPoints[i].x),
-                static_cast<int>(movingPoints[i].y)
-            ));
-        }
-
-        std::vector<cv::Point> integerPoints = trackedFeatures.getFeaturePoints();
-
-        // Salva frame annotato con la bbox piu' recente disponibile.
-        cv::Mat output = currentFrame.clone();
-
-        cv::rectangle(output, lastBox, cv::Scalar(0, 255, 0), 2);
-
-        if (showSavedFeatures)
-        {
-            // Visualizza sul frame corrente le feature mantenute dopo i filtri.
-            for (size_t i = 0; i < integerPoints.size(); ++i)
-            {
-                cv::circle(output, integerPoints[i], 2, cv::Scalar(0, 0, 255), -1);
-            }
-        }
-
-        std::string outputPath = outputFolder + cv::format("/frame_%04d.png", frameCounter);
-        if (!cv::imwrite(outputPath, output))
-        {
-            std::cerr << "Errore: impossibile salvare " << outputPath << std::endl;
             return false;
         }
 
@@ -396,7 +193,8 @@ static bool processCategory(const std::string& inputFolder)
         std::cout << "[DEBUG] Fine categoria " << inputFolder << ", frame elaborati: " << frameCounter << std::endl;
     }
 
-    std::cout << "Elaborazione completata. Immagini annotate salvate in: " << outputFolder << std::endl;
+    std::cout << "Elaborazione completata. Immagini annotate salvate in: " << inputFolder << " followed by the desired words" << std::endl;
+    std::cout << "ACTUAL SCORE: "<<score<<std::endl;
     return true;
 }
 

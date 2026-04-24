@@ -12,6 +12,7 @@ add_executable(${PROJECT_NAME}
     src/imageIterator.cpp
     src/feature.cpp
     src/featureList.cpp
+    src/utils.cpp
     )
 
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})

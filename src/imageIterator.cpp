@@ -1,7 +1,14 @@
 #include <imageIterator.h>
-#include <algorithm>
+#include <opencv2/core/utils/filesystem.hpp>
+
 
 ImageIterator::ImageIterator(const std::string& path){
+
+    if (!cv::utils::fs::exists(path)) {
+        std::cerr << "Errore: cartella input non trovata: " << path << std::endl;
+        return;
+    }
+
     this->path = path;
     currentIndex = 0;
 
