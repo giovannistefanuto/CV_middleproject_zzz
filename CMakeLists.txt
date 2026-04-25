@@ -10,8 +10,6 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 add_executable(${PROJECT_NAME}
     apps/main.cpp
     src/imageIterator.cpp
-    src/feature.cpp
-    src/featureList.cpp
     src/utils.cpp
     )
 
