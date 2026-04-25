@@ -4,19 +4,18 @@
 #include <vector>
 #include <opencv2/core/utils/filesystem.hpp>
 #include <opencv2/opencv.hpp>
-#include <iostream>
 
 std::vector<cv::Point> extract_ground_truth(const std::string& path);
-std::string getLastPart(const std::string& path);
-float evaluate_mIoU(std::vector<cv::Point>&, std::vector<cv::Point>&);
-void detectSIFTPoints(const cv::Mat&, cv::Ptr<cv::SIFT>&, std::vector<cv::Point2f>&);
-bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>&, const cv::Size&, cv::Rect&);
+std::string getLastPathPart(const std::string& path);
+float evaluate_mIoU(const std::vector<cv::Point>& predicted_points, const std::vector<cv::Point>& ground_truth_points);
+void detectSIFTPoints(const cv::Mat& gray, cv::Ptr<cv::SIFT>& sift, std::vector<cv::Point2f>& points);
+bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>& points, const cv::Size& imageSize, cv::Rect& box);
+bool processCategory(const std::string& inputFolder);
 
-void accumulateMotion(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<float>& allMotions);
-int featureFilter(std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2f>& savedPoints, std::vector<float>& allMotions);
+
+void accumulateMotion(const std::vector<cv::Point2f>& newPoints, const std::vector<cv::Point2f>& activePoints, const std::vector<uchar>& active, std::vector<float>& allMotions);
+int featureFilter(const std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2f>& savedPoints, const std::vector<float>& allMotions);
 bool saveFrame(const std::string& folder, const cv::Mat& frame, const cv::Rect& box, const std::vector<cv::Point2f>& savedPoints, int frameCounter, bool showFeatures);
 bool keepDebugOutput(const std::string& path);
-
-//static void drawBoundingBoxFromPoints(cv::Mat& image, const std::vector<cv::Point2f>& points);
 
 #endif // UTILS_DI_PROVA_HPP

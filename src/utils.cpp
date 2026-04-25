@@ -3,9 +3,78 @@
 #include <utils.h>
 #include <fstream>
 #include <algorithm>
+#include <imageIterator.h>
 
+bool processCategory(const std::string& inputFolder)
+{
+    const bool showSavedFeatures = true;
+    bool logFeatureMotion=keepDebugOutput(inputFolder);
+    
+    // Iteratore immagini della categoria (supporta PNG/JPG ordinati).
+    ImageIterator iterator(inputFolder);
+    if (!iterator.hasNext()) {
+        std::cerr << "Errore: nessuna immagine PNG/JPG trovata in " << inputFolder << std::endl;
+        return false;
+    }
 
-std::vector<cv::Point> extract_ground_truth(const std::string& path){
+    int aliveFeatures, numFrames=15;
+    std::string category= getLastPathPart(inputFolder);
+    std::vector<cv::Mat> frames(numFrames);
+    std::vector<float> motions, err;
+    std::vector<uchar> status;
+    std::vector<cv::Point2f> referencePoints, movedPoints, printablePoints;
+    std::vector<cv::Point> realPoints = extract_ground_truth(category);
+
+    cv::Rect box;
+    cv::Mat referenceGray, actualGray;
+    cv::Point box_point_1,box_point_2;
+    cv::Ptr<cv::SIFT> sift = cv::SIFT::create(60000);
+
+    for(int i=0;iterator.hasNext();i++)
+    {
+        iterator.next(frames[i%numFrames]);
+        if(i%numFrames==0)
+        {
+            cv::cvtColor(frames[0], referenceGray, cv::COLOR_BGR2GRAY);
+            referencePoints.clear();
+            detectSIFTPoints(referenceGray, sift, referencePoints);
+            motions = std::vector<float>(referencePoints.size());
+            continue;
+        }
+        cv::cvtColor(frames[i%numFrames], actualGray, cv::COLOR_BGR2GRAY);
+        cv::calcOpticalFlowPyrLK(referenceGray, actualGray, referencePoints, movedPoints, status, err);
+        accumulateMotion(movedPoints,referencePoints,status,motions);
+        if((i+1)%numFrames==0 || !iterator.hasNext())
+        //if(!iterator.hasNext())
+        {
+            aliveFeatures = featureFilter(referencePoints,printablePoints,motions);
+            computeBoundingBoxFromPoints(printablePoints, frames[0].size(), box);
+            box_point_1= cv::Point(box.x,box.y);
+            box_point_2= cv::Point(box.x+box.width,box.y+box.height);
+            std::vector<cv::Point> boxPoints{box_point_1,box_point_2};
+
+            if(i==numFrames-1)
+            {
+                float score=evaluate_mIoU(boxPoints,realPoints);
+                std::cout<<score<<std::endl;
+            }
+            bool result=true;
+            for(int j=0;j<numFrames && j<i;j++)
+            {   
+                //result &= saveFrame(inputFolder,frames[j],box,printablePoints,j+1,showSavedFeatures);
+                result &= saveFrame(inputFolder,frames[j],box,printablePoints,i-(numFrames-j)+1,showSavedFeatures);
+            }
+            if(!result)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::vector<cv::Point> extract_ground_truth(const std::string& path)
+{
     std::ifstream file("../dataset/labels/"+path+"/0000.txt");
     int temp;
     cv::Point p1,p2;
@@ -24,14 +93,16 @@ std::vector<cv::Point> extract_ground_truth(const std::string& path){
     return ground_truth;
 }
 
-std::string getLastPart(const std::string& path){
+std::string getLastPathPart(const std::string& path)
+{
     size_t pos=path.find_last_of("/\\");
     if(pos==std::string::npos)
         return path;
     return path.substr(pos+1);
 }
 
-float evaluate_mIoU(std::vector<cv::Point>& predicted_points, std::vector<cv::Point>& ground_truth_points) {
+float evaluate_mIoU(const std::vector<cv::Point>& predicted_points, const std::vector<cv::Point>& ground_truth_points) 
+{
     // Controllo di sicurezza base
     if (predicted_points.size() < 2 || ground_truth_points.size() < 2) {
         return 0.0f;
@@ -122,7 +193,8 @@ bool computeBoundingBoxFromPoints(const std::vector<cv::Point2f>& points, const 
     return true;
 }
 
-void accumulateMotion(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point2f>& activePoints, std::vector<uchar>& active, std::vector<float>& allMotions){
+void accumulateMotion(const std::vector<cv::Point2f>& newPoints, const std::vector<cv::Point2f>& activePoints, const std::vector<uchar>& active, std::vector<float>& allMotions)
+{
     //float minMovement = 0.70f;
     const float maxMovement = 100.0f;
     float motion, max=0;
@@ -144,9 +216,10 @@ void accumulateMotion(std::vector<cv::Point2f>& newPoints, std::vector<cv::Point
     }
 }
 
-int featureFilter(std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2f>& savedPoints, std::vector<float>& allMotions){
+int featureFilter(const std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2f>& savedPoints, const std::vector<float>& allMotions)
+{
 
-    float minMovement;//=*std::max_element(allMotions.begin(),allMotions.end());
+    float minMovement;
 
     float sigma;
     float meanMovement=0.0f;
@@ -161,7 +234,7 @@ int featureFilter(std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2
         sq_sum += (m - meanMovement) * (m - meanMovement);
     }
 
-    minMovement = meanMovement+std::sqrt(std::sqrt(sq_sum));
+    minMovement = meanMovement+1*std::sqrt(std::sqrt(sq_sum));
     int survived=0;
     savedPoints.clear();
 
@@ -171,15 +244,6 @@ int featureFilter(std::vector<cv::Point2f>& activePoints, std::vector<cv::Point2
             savedPoints.push_back(activePoints[i]);
             ++survived;
         }
-        /*
-        if (verbose)
-        {
-            std::cout << "[DEBUG][Frame 0->1] feature " << i
-                        << " prev=(" << activePoints[i].x << "," << activePoints[i].y << ")"
-                        << " next=(" << newPoints[i].x << "," << newPoints[i].y << ")"
-                        << " motion=" << motion << std::endl;
-        }
-        */
     }
 
     return survived;
@@ -243,35 +307,3 @@ bool keepDebugOutput(const std::string& path){
 
     return logFeatureMotion;
 }
-
-// TODO: are those used??
-
-/*
-static void drawBoundingBoxFromPoints(cv::Mat& image, const std::vector<cv::Point2f>& points)
-{
-    if (points.empty())
-    {
-        return;
-    }
-
-    float minX = points[0].x;
-    float maxX = points[0].x;
-    float minY = points[0].y;
-    float maxY = points[0].y;
-
-    for (size_t i = 1; i < points.size(); ++i)
-    {
-        minX = std::min(minX, points[i].x);
-        maxX = std::max(maxX, points[i].x);
-        minY = std::min(minY, points[i].y);
-        maxY = std::max(maxY, points[i].y);
-    }
-
-    cv::Rect box(
-        cv::Point(static_cast<int>(minX), static_cast<int>(minY)),
-        cv::Point(static_cast<int>(maxX), static_cast<int>(maxY))
-    );
-
-    cv::rectangle(image, box, cv::Scalar(0, 255, 0), 2);
-}
-*/
